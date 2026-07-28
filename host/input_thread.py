@@ -6,11 +6,25 @@ from pynput.keyboard import Controller as KeyboardController, Key
 mouse = MouseController()
 keyboard = KeyboardController()
 
+# Translation map: Map Mac-specific modifiers to Windows/Linux equivalents
+MAC_TO_WIN_MAP = {
+    "cmd": "ctrl",         # Mac Command -> Windows Control
+    "cmd_l": "ctrl_l",     # Left Command
+    "cmd_r": "ctrl_r",     # Right Command
+    "alt": "alt",          # Mac Option is typically sent as 'alt' by pynput
+    "alt_l": "alt_l",
+    "alt_r": "alt_r"
+}
+
 def execute_command(cmd):
     """
     Translates the parsed JSON dictionary into OS-level actions.
+    Checks the 'client_os' field to translate keyboard modifiers if needed.
     """
     action = cmd.get("action")
+    
+    # Default to "windows" if the field is missing so old clients don't crash
+    client_os = cmd.get("client_os", "windows").lower() 
     
     if action == "move":
         mouse.position = (cmd.get("x", 0), cmd.get("y", 0))
@@ -25,11 +39,19 @@ def execute_command(cmd):
         
     elif action == "key_press":
         key_val = cmd.get("key")
+        
+        # 1. Translate the key if the client is on a Mac
+        if client_os == "mac":
+            # If the key is in our dictionary, swap it out. Otherwise, keep it as is.
+            key_val = MAC_TO_WIN_MAP.get(key_val, key_val)
+            
+        # 2. Execute the keystroke
         if hasattr(Key, key_val):
             special_key = getattr(Key, key_val)
             keyboard.press(special_key)
             keyboard.release(special_key)
         else:
+            # Standard alphanumeric character
             keyboard.type(key_val)
 
 def recvall(sock, n):
