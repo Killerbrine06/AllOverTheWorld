@@ -103,6 +103,29 @@ class RemoteDesktopClient(QMainWindow):
             self.input_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
         except Exception as e:
             print(f"Failed to connect input socket: {e}")
+            
+    def closeEvent(self, event):
+        """
+        Triggered automatically by PyQt when the user clicks the 'X' 
+        to close the window.
+        """
+        print("Shutting down connections...")
+        
+        # 1. Close the input socket safely
+        if hasattr(self, 'input_socket') and self.input_socket:
+            try:
+                self.input_socket.close()
+            except Exception as e:
+                print(f"Error closing input socket: {e}")
+
+        # 2. Stop the video receiver thread
+        if hasattr(self, 'video_thread') and self.video_thread.isRunning():
+            # In PyQt, forcefully terminating threads can cause crashes.
+            # Calling quit() tells the thread's event loop to stop cleanly.
+            self.video_thread.quit()
+            self.video_thread.wait(1000) # Wait up to 1 second for it to finish
+            
+        event.accept()
 
     def send_command(self, cmd_dict):
         """Packages a dictionary into JSON with the 4-byte header and sends it."""
