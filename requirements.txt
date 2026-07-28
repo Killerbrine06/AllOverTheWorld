@@ -2,3 +2,4 @@ numpy
 mss
 opencv-python
 pynput
+PyQt6
