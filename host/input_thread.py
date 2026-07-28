@@ -68,8 +68,12 @@ def recvall(sock, n):
 
 def input_stream_worker(client_socket):
     """
-    Listens for 4-byte headers, reads the exact JSON payload, and executes it.
+    Listens for 4-byte headers, reads the exact JSON payload safely, 
+    and executes it.
     """
+    # A single JSON command for mouse/keyboard should never exceed 1-2 KB.
+    MAX_COMMAND_SIZE = 2048 
+    
     try:
         while True:
             # 1. Read the 4-byte size header
@@ -77,10 +81,15 @@ def input_stream_worker(client_socket):
             if not raw_msglen:
                 break
             
-            # Unpack the 4 bytes into an integer (Big Endian)
+            # Unpack the integer
             msglen = struct.unpack(">L", raw_msglen)[0]
             
-            # 2. Read exactly 'msglen' bytes for the JSON payload
+            # THE FIX: Bounds checking
+            if msglen > MAX_COMMAND_SIZE:
+                print(f"SECURITY ALERT: Payload size {msglen} exceeds limit. Dropping client.")
+                break # Break the loop to disconnect the malicious client
+            
+            # 2. Read the JSON payload safely
             raw_data = recvall(client_socket, msglen)
             if not raw_data:
                 break
@@ -100,3 +109,4 @@ def input_stream_worker(client_socket):
         print(f"Input stream error: {e}")
     finally:
         client_socket.close()
+        
