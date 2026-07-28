@@ -15,21 +15,32 @@ SECRET_TOKEN = "my_secure_mesh_password"
 def authenticate_client(client_socket):
     """
     Forces the client to send a JSON auth payload before doing anything else.
-    Expected format: {"token": "my_secure_mesh_password"}
+    Includes bounds-checking to prevent memory exhaustion DoS attacks.
     """
+    # Max size for our {"token": "..."} JSON is tiny. 
+    # 1024 bytes is more than generous.
+    MAX_PAYLOAD_SIZE = 1024 
+    
     try:
         # 1. Read the 4-byte size header
         raw_msglen = recvall(client_socket, 4)
         if not raw_msglen:
             return False
         
-        # 2. Read the JSON payload
+        # 2. Unpack the requested size
         msglen = struct.unpack(">L", raw_msglen)[0]
+        
+        # THE FIX: Bounds checking
+        if msglen > MAX_PAYLOAD_SIZE:
+            print(f"SECURITY ALERT: Client attempted to send {msglen} bytes. Dropping.")
+            return False
+            
+        # 3. Read the JSON payload safely
         raw_data = recvall(client_socket, msglen)
         if not raw_data:
             return False
             
-        # 3. Parse and verify
+        # 4. Parse and verify
         auth_msg = json.loads(raw_data.decode('utf-8'))
         if auth_msg.get("token") == SECRET_TOKEN:
             return True
