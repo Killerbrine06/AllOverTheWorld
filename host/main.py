@@ -82,8 +82,29 @@ def server_listener(port, worker_function, name):
         else:
             print(f"[{name}] Auth FAILED for {addr}. Dropping connection.")
             client_socket.close()
+            
+def get_local_ip():
+    """
+    Finds the machine's true local IPv4 address on the LAN/Wi-Fi.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Doesn't need to be reachable; no packets are actually transmitted
+        s.connect(('8.8.8.8', 80))
+        local_ip = s.getsockname()[0]
+    except Exception:
+        local_ip = '127.0.0.1'
+    finally:
+        s.close()
+    return local_ip
 
 if __name__ == "__main__":
+    local_ip = get_local_ip()
+    print("="*50)
+    print(f"HOST MACHINE LAN IPv4: {local_ip}")
+    print(f"Run this on your Client PC:")
+    print(f"  python client.py {local_ip} --token {SECRET_TOKEN}")
+    print("="*50)
     # Start the Input Server on Port 5001 in the background
     input_thread = threading.Thread(
         target=server_listener, 
