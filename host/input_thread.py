@@ -1,10 +1,12 @@
 import json
+import sys
 import struct
 from pynput.mouse import Controller as MouseController, Button
 from pynput.keyboard import Controller as KeyboardController, Key
 
 mouse = MouseController()
 keyboard = KeyboardController()
+HOST_OS = "mac" if sys.platform == "darwin" else "windows"
 
 # Translation map: Map Mac-specific modifiers to Windows/Linux equivalents
 MAC_TO_WIN_MAP = {
@@ -16,15 +18,22 @@ MAC_TO_WIN_MAP = {
     "alt_r": "alt_r"
 }
 
+WIN_TO_MAC_MAP = {
+    "ctrl": "cmd",         # Windows Ctrl -> Mac Command (for copy/paste/shortcuts)
+    "ctrl_l": "cmd_l",
+    "ctrl_r": "cmd_r",
+    "alt": "alt",          # Windows Alt -> Mac Option (pynput treats both as 'alt')
+    "alt_l": "alt_l",
+    "alt_r": "alt_r"
+}
+
 def execute_command(cmd):
     """
     Translates the parsed JSON dictionary into OS-level actions.
-    Checks the 'client_os' field to translate keyboard modifiers if needed.
+    Performs bidirectional keyboard modifier translation between Mac and Win/Linux.
     """
     action = cmd.get("action")
-    
-    # Default to "windows" if the field is missing so old clients don't crash
-    client_os = cmd.get("client_os", "windows").lower() 
+    client_os = cmd.get("client_os", "windows").lower()
     
     if action == "move":
         mouse.position = (cmd.get("x", 0), cmd.get("y", 0))
@@ -40,18 +49,22 @@ def execute_command(cmd):
     elif action == "key_press":
         key_val = cmd.get("key")
         
-        # 1. Translate the key if the client is on a Mac
-        if client_os == "mac":
-            # If the key is in our dictionary, swap it out. Otherwise, keep it as is.
+        # --- BIDIRECTIONAL KEYBOARD TRANSLATION ---
+        # Case A: Mac Client controlling a Windows/Linux Host
+        if client_os == "mac" and HOST_OS == "windows":
             key_val = MAC_TO_WIN_MAP.get(key_val, key_val)
             
-        # 2. Execute the keystroke
+        # Case B: Windows/Linux Client controlling a Mac Host
+        elif client_os == "windows" and HOST_OS == "mac":
+            key_val = WIN_TO_MAC_MAP.get(key_val, key_val)
+        # ------------------------------------------
+            
+        # Execute the keystroke on the Host OS
         if hasattr(Key, key_val):
             special_key = getattr(Key, key_val)
             keyboard.press(special_key)
             keyboard.release(special_key)
         else:
-            # Standard alphanumeric character
             keyboard.type(key_val)
 
 def recvall(sock, n):
