@@ -3,7 +3,6 @@ import threading
 import struct
 import numpy as np
 import cv2
-import mss
 
 import sys
 import platform
@@ -22,17 +21,22 @@ IS_WINDOWS = (platform.system() == "Windows")
 
 if IS_WINDOWS:
     import dxcam
-    # dxcam uses DirectX Desktop Duplication -> bypasses all DPI blur & runs at max speed
-    camera = dxcam.create(output_color="BGR")
-    camera.start(target_fps=60)
 else:
     import mss
-    sct = mss.mss()
-    monitor = sct.monitors[1]
 
 def video_stream_worker(client_socket):
     # Quality 78 is the sweet spot for crisp text without choking Wi-Fi bandwidth
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 78]
+    
+    # 1. Initialize camera inside the worker so every new connection gets a fresh handle
+    camera = None
+    sct = None
+    if IS_WINDOWS:
+        camera = dxcam.create(output_color="BGR")
+        camera.start(target_fps=60)
+    else:
+        sct = mss.mss()
+        monitor = sct.monitors[1]
     
     try:
         while True:
@@ -59,17 +63,30 @@ def video_stream_worker(client_socket):
             # 4. Send size header (4 bytes) + image payload
             client_socket.sendall(struct.pack(">L", size) + data)
 
-    except (ConnectionResetError, BrokenPipeError):
-        print("Video client disconnected.")
+    # CATCH WINDOWS ERROR 10053 EXPLICITLY AS A CLEAN DISCONNECT
+    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
+        print("[Video Server] Client disconnected cleanly.")
     except Exception as e:
-        print(f"Video stream error: {e}")
+        print(f"[Video Server] Unexpected stream error: {e}")
     finally:
-        if IS_WINDOWS:
-            camera.stop()
+        # Stop and delete the DXcam instance so the next connection can reuse the GPU
+        if IS_WINDOWS and camera is not None:
+            try:
+                camera.stop()
+                del camera
+            except Exception:
+                pass
+                
+        # Gracefully shut down the socket before closing to free the Windows TCP port instantly
+        try:
+            client_socket.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
         client_socket.close()
+        print("[Video Server] Socket closed. Ready for new connection.")
 
 # Example usage (setting up the server socket):
-def start_host_server(host='0.0.0.0', port=5000):
+def start_host_server(host='0.0.0.0', port=5050):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # Allow immediate port reuse if the script crashes
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

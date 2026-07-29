@@ -1,5 +1,6 @@
 import json
 import sys
+import socket
 import struct
 from pynput.mouse import Controller as MouseController, Button
 from pynput.keyboard import Controller as KeyboardController, Key
@@ -131,10 +132,15 @@ def input_stream_worker(client_socket):
             except json.JSONDecodeError:
                 print(f"Malformed JSON dropped: {command_str}")
 
-    except (ConnectionResetError, BrokenPipeError):
-        print("Input stream disconnected.")
+    # CATCH WINDOWS ERROR 10053 EXPLICITLY AS A CLEAN DISCONNECT
+    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
+        print("[Input Server] Client disconnected cleanly.")
     except Exception as e:
-        print(f"Input stream error: {e}")
+        print(f"[Input Server] Unexpected stream error: {e}")
     finally:
+        try:
+            client_socket.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
         client_socket.close()
-        
+        print("[Input Server] Socket closed. Ready for new connection.")
