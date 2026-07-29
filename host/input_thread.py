@@ -3,6 +3,13 @@ import sys
 import struct
 from pynput.mouse import Controller as MouseController, Button
 from pynput.keyboard import Controller as KeyboardController, Key
+import platform
+if platform.system() == "Windows":
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+    except AttributeError:
+        ctypes.windll.user32.SetProcessDPIAware()
 
 mouse = MouseController()
 keyboard = KeyboardController()

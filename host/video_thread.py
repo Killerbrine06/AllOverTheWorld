@@ -5,13 +5,26 @@ import numpy as np
 import cv2
 import mss
 
+import sys
+import platform
+
+# --- FORCE WINDOWS TO GIVE NATIVE RESOLUTION (NO DPI BLUR / LAG) ---
+if platform.system() == "Windows":
+    try:
+        import ctypes
+        # SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+    except AttributeError:
+        # Fallback for older Windows builds
+        ctypes.windll.user32.SetProcessDPIAware()
+
 def video_stream_worker(client_socket):
     """
     Captures the screen, compresses it to JPEG, and streams it over TCP.
     """
     # Set JPEG compression quality (0-100). 
     # Lower is faster and uses less bandwidth, but looks worse.
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
 
     with mss.mss() as sct:
         # Get the primary monitor's dimensions

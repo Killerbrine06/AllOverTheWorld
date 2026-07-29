@@ -8,6 +8,8 @@ import numpy as np
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
+import os
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
 # Configuration
 HOST_IP = '127.0.0.1'  # Replace with the Tailscale IP of your Host
