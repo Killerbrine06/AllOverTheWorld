@@ -17,50 +17,56 @@ if platform.system() == "Windows":
     except AttributeError:
         # Fallback for older Windows builds
         ctypes.windll.user32.SetProcessDPIAware()
+        
+IS_WINDOWS = (platform.system() == "Windows")
+
+if IS_WINDOWS:
+    import dxcam
+    # dxcam uses DirectX Desktop Duplication -> bypasses all DPI blur & runs at max speed
+    camera = dxcam.create(output_color="BGR")
+    camera.start(target_fps=60)
+else:
+    import mss
+    sct = mss.mss()
+    monitor = sct.monitors[1]
 
 def video_stream_worker(client_socket):
-    """
-    Captures the screen, compresses it to JPEG, and streams it over TCP.
-    """
-    # Set JPEG compression quality (0-100). 
-    # Lower is faster and uses less bandwidth, but looks worse.
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+    # Quality 78 is the sweet spot for crisp text without choking Wi-Fi bandwidth
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 78]
+    
+    try:
+        while True:
+            # --- 2. GRAB THE FRAME ---
+            if IS_WINDOWS:
+                # Grab latest frame directly from GPU memory
+                frame = camera.get_latest_frame()
+                if frame is None:
+                    continue  # If screen hasn't updated this microsecond, skip
+            else:
+                raw_frame = sct.grab(monitor)
+                frame = np.array(raw_frame)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            # -------------------------
 
-    with mss.mss() as sct:
-        # Get the primary monitor's dimensions
-        monitor = sct.monitors[1] 
-        print(f"Streaming monitor: {monitor['width']}x{monitor['height']}")
+            # 3. Compress to JPEG
+            result, encoded_frame = cv2.imencode('.jpg', frame, encode_param)
+            if not result:
+                continue
+                
+            data = encoded_frame.tobytes()
+            size = len(data)
+            
+            # 4. Send size header (4 bytes) + image payload
+            client_socket.sendall(struct.pack(">L", size) + data)
 
-        try:
-            while True:
-                # 1. Capture the screen (returns a BGRA array)
-                raw_img = np.array(sct.grab(monitor))
-
-                # 2. Drop the Alpha (transparency) channel
-                # OpenCV handles BGR better for JPEG compression, and Alpha is useless for screen sharing
-                frame = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2BGR)
-
-                # 3. Compress the frame to JPEG
-                success, encoded_frame = cv2.imencode('.jpg', frame, encode_param)
-                if not success:
-                    continue
-
-                # Convert the encoded matrix to a flat byte array
-                data = encoded_frame.tobytes()
-
-                # 4. Pack the frame size into a 4-byte unsigned integer (Big Endian network byte order)
-                # This tells the client exactly how many bytes to read for this specific frame
-                size_header = struct.pack(">L", len(data))
-
-                # 5. Send the header followed by the image data
-                client_socket.sendall(size_header + data)
-
-        except (ConnectionResetError, BrokenPipeError):
-            print("Client disconnected.")
-        except Exception as e:
-            print(f"Streaming error: {e}")
-        finally:
-            client_socket.close()
+    except (ConnectionResetError, BrokenPipeError):
+        print("Video client disconnected.")
+    except Exception as e:
+        print(f"Video stream error: {e}")
+    finally:
+        if IS_WINDOWS:
+            camera.stop()
+        client_socket.close()
 
 # Example usage (setting up the server socket):
 def start_host_server(host='0.0.0.0', port=5000):
