@@ -213,6 +213,21 @@ class RemoteDesktopClient(QMainWindow):
             btn = "left" if event.button() == Qt.MouseButton.LeftButton else "right"
             self.send_command({"action": "mouse_up", "button": btn, "x": coords[0], "y": coords[1]})
 
+    def wheelEvent(self, event):
+        """Intercepts trackpad two-finger scrolling or mouse wheel scrolling."""
+        # PyQt6 returns angleDelta in 1/8th of a degree. Standard step is 120 (15 degrees * 8).
+        # We divide by 120 to get normal vertical/horizontal scroll steps for pynput.
+        delta_x = event.angleDelta().x() / 120.0
+        delta_y = event.angleDelta().y() / 120.0
+        
+        # Only send if there is actual movement
+        if delta_x != 0 or delta_y != 0:
+            self.send_command({
+                "action": "scroll", 
+                "dx": delta_x, 
+                "dy": delta_y
+            })
+
     def _get_key_name(self, event):
         """Helper to map PyQt key events to string names compatible with pynput."""
         special_keys = {

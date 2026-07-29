@@ -59,6 +59,12 @@ def execute_command(cmd):
             mouse.position = (cmd.get("x"), cmd.get("y"))
         mouse.release(btn)
         
+    elif action == "scroll":
+        dx = cmd.get("dx", 0)
+        dy = cmd.get("dy", 0)
+        # pynput scroll takes (horizontal_steps, vertical_steps)
+        mouse.scroll(dx, dy)
+        
     elif action in ("key_down", "key_up"):
         key_val = cmd.get("key")
         
