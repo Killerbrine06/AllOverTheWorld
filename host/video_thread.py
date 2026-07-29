@@ -11,7 +11,7 @@ def video_stream_worker(client_socket):
     """
     # Set JPEG compression quality (0-100). 
     # Lower is faster and uses less bandwidth, but looks worse.
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
 
     with mss.mss() as sct:
         # Get the primary monitor's dimensions

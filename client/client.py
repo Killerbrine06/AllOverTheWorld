@@ -34,7 +34,7 @@ class VideoReceiverThread(QThread):
     def run(self):
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            client_socket.connect((HOST_IP, 5000))
+            client_socket.connect((HOST_IP, 5050))
             
             # Send Authentication Token
             auth_payload = json.dumps({"token": SECRET_TOKEN}).encode('utf-8')
@@ -98,7 +98,7 @@ class RemoteDesktopClient(QMainWindow):
     def connect_input_socket(self):
         """Establishes the connection for the input stream and authenticates."""
         try:
-            self.input_socket.connect((HOST_IP, 5001))
+            self.input_socket.connect((HOST_IP, 5051))
             auth_payload = json.dumps({"token": SECRET_TOKEN}).encode('utf-8')
             self.input_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
         except Exception as e:
@@ -203,29 +203,48 @@ class RemoteDesktopClient(QMainWindow):
         coords = self.translate_coordinates(event.position().x(), event.position().y())
         if coords:
             btn = "left" if event.button() == Qt.MouseButton.LeftButton else "right"
-            self.send_command({"action": "click", "button": btn, "x": coords[0], "y": coords[1]})
-
-    def keyPressEvent(self, event):
-        # PyQt maps keys to an enum. We extract the text, or handle special keys.
-        key_text = event.text()
-        
-        if not key_text:
-            # Map special Qt keys to pynput string names
-            special_keys = {
-                Qt.Key.Key_Return: "enter",
-                Qt.Key.Key_Backspace: "backspace",
-                Qt.Key.Key_Escape: "esc",
-                Qt.Key.Key_Space: "space",
-                Qt.Key.Key_Shift: "shift",
-                Qt.Key.Key_Control: "ctrl",
-                Qt.Key.Key_Meta: "cmd"  # Mac command key
-            }
-            key_name = special_keys.get(event.key())
-        else:
-            key_name = key_text.lower()
+            self.send_command({"action": "mouse_down", "button": btn, "x": coords[0], "y": coords[1]})
             
+    def mouseReleaseEvent(self, event):
+        coords = self.translate_coordinates(event.position().x(), event.position().y())
+        if coords:
+            btn = "left" if event.button() == Qt.MouseButton.LeftButton else "right"
+            self.send_command({"action": "mouse_up", "button": btn, "x": coords[0], "y": coords[1]})
+
+    def _get_key_name(self, event):
+        """Helper to map PyQt key events to string names compatible with pynput."""
+        special_keys = {
+            Qt.Key.Key_Return: "enter",
+            Qt.Key.Key_Backspace: "backspace",
+            Qt.Key.Key_Escape: "esc",
+            Qt.Key.Key_Space: "space",
+            Qt.Key.Key_Shift: "shift",
+            Qt.Key.Key_Control: "ctrl",
+            Qt.Key.Key_Meta: "cmd",       # Mac Command Key
+            Qt.Key.Key_Alt: "alt",
+            Qt.Key.Key_Up: "up",          # Arrow Keys
+            Qt.Key.Key_Down: "down",
+            Qt.Key.Key_Left: "left",
+            Qt.Key.Key_Right: "right",
+            Qt.Key.Key_Tab: "tab",
+            Qt.Key.Key_Delete: "delete"
+        }
+        if event.key() in special_keys:
+            return special_keys[event.key()]
+        
+        # Standard character key
+        text = event.text()
+        return text.lower() if text else None
+    
+    def keyPressEvent(self, event):
+        key_name = self._get_key_name(event)
         if key_name:
-            self.send_command({"action": "key_press", "key": key_name})
+            self.send_command({"action": "key_down", "key": key_name})
+
+    def keyReleaseEvent(self, event):
+        key_name = self._get_key_name(event)
+        if key_name:
+            self.send_command({"action": "key_up", "key": key_name})
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mesh Remote Desktop Client")
@@ -237,7 +256,7 @@ if __name__ == '__main__':
     
     # 3. Override the global variables before starting the app
     HOST_IP = args.ip
-    SECRET_TOKEN = args.token
+    # SECRET_TOKEN = args.token
     
     app = QApplication(sys.argv)
     window = RemoteDesktopClient()

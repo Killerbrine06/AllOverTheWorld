@@ -38,34 +38,36 @@ def execute_command(cmd):
     if action == "move":
         mouse.position = (cmd.get("x", 0), cmd.get("y", 0))
         
-    elif action == "click":
+    elif action == "mouse_down":
         btn_str = cmd.get("button", "left")
         btn = Button.right if btn_str == "right" else Button.left
-        
         if "x" in cmd and "y" in cmd:
             mouse.position = (cmd.get("x"), cmd.get("y"))
-        mouse.click(btn, 1)
+        mouse.press(btn)
         
-    elif action == "key_press":
+    elif action == "mouse_up":
+        btn_str = cmd.get("button", "left")
+        btn = Button.right if btn_str == "right" else Button.left
+        if "x" in cmd and "y" in cmd:
+            mouse.position = (cmd.get("x"), cmd.get("y"))
+        mouse.release(btn)
+        
+    elif action in ("key_down", "key_up"):
         key_val = cmd.get("key")
         
-        # --- BIDIRECTIONAL KEYBOARD TRANSLATION ---
-        # Case A: Mac Client controlling a Windows/Linux Host
+        # Translate Mac Cmd -> Windows Ctrl
         if client_os == "mac" and HOST_OS == "windows":
             key_val = MAC_TO_WIN_MAP.get(key_val, key_val)
-            
-        # Case B: Windows/Linux Client controlling a Mac Host
         elif client_os == "windows" and HOST_OS == "mac":
             key_val = WIN_TO_MAC_MAP.get(key_val, key_val)
-        # ------------------------------------------
             
-        # Execute the keystroke on the Host OS
-        if hasattr(Key, key_val):
-            special_key = getattr(Key, key_val)
-            keyboard.press(special_key)
-            keyboard.release(special_key)
+        # Determine if it's a special Key object (like Key.up, Key.ctrl, Key.enter) or a standard character
+        target_key = getattr(Key, key_val) if hasattr(Key, key_val) else key_val
+        
+        if action == "key_down":
+            keyboard.press(target_key)
         else:
-            keyboard.type(key_val)
+            keyboard.release(target_key)
 
 def recvall(sock, n):
     """

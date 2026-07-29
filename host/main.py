@@ -7,6 +7,14 @@ import os
 # Import the worker functions we already wrote
 from video_thread import video_stream_worker
 from input_thread import input_stream_worker, recvall
+import sys
+import signal
+
+def signal_handler(sig, frame):
+    print("\n[!] Force closing server...")
+    os._exit(0)  # Immediately terminates all daemon threads and sockets
+
+signal.signal(signal.SIGINT, signal_handler)
 
 # The Security Layer: In a real app, you would use a TOTP library (like pyotp) 
 # or load this from an environment variable.
