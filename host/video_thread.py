@@ -23,8 +23,9 @@ else:
     import mss
 
 def video_stream_worker(client_socket):
-    # With Dirty Rectangles saving 80-95% bandwidth, we can bump quality to 92 for sharp text!
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 92]
+    # PNG Compression Level: 0 (fastest/largest) to 9 (slowest/smallest)
+    # Level 2 is the real-time sweet spot for lossless UI patches
+    encode_param = [int(cv2.IMWRITE_PNG_COMPRESSION), 2]
     
     camera = None
     sct = None
@@ -56,14 +57,12 @@ def video_stream_worker(client_socket):
                 prev_frame = curr_frame.copy()
             else:
                 # --- DIRTY RECTANGLE DETECTION ---
-                # Absolute difference between frames
                 diff = cv2.absdiff(curr_frame, prev_frame)
                 gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
                 
-                # Threshold ignores minor GPU/video rendering noise (values under 15)
+                # Threshold ignores minor GPU/video rendering noise
                 _, thresh = cv2.threshold(gray_diff, 15, 255, cv2.THRESH_BINARY)
                 
-                # Find bounding box coordinates of pixels that changed
                 y_indices, x_indices = np.where(thresh > 0)
                 
                 # If zero pixels changed, skip transmitting entirely!
@@ -83,8 +82,8 @@ def video_stream_worker(client_socket):
                 prev_frame = curr_frame.copy()
                 # ---------------------------------
 
-            # 3. Compress ONLY the patch to JPEG
-            result, encoded_patch = cv2.imencode('.jpg', patch, encode_param)
+            # 3. Compress ONLY the patch to PNG (Lossless)
+            result, encoded_patch = cv2.imencode('.png', patch, encode_param)
             if not result:
                 continue
                 
