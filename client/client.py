@@ -5,16 +5,15 @@ import json
 import cv2
 import argparse
 import numpy as np
-from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
+import os
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout, 
     QWidget, QDialog, QLineEdit, QDialogButtonBox, QMessageBox
 )
-from PyQt6.QtCore import Qt
-import os
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QImage, QPixmap, QPainter
 
 # Configuration
 HOST_IP = '127.0.0.1'  # Replace with the Tailscale IP of your Host
@@ -81,11 +80,11 @@ class AuthDialog(QDialog):
 
 class VideoReceiverThread(QThread):
     """
-    Runs in the background, receiving JPEG frames, decoding them, 
-    and emitting them to the main GUI thread.
+    Runs in the background, receiving JPEG patches with 12-byte headers, 
+    decoding them, and emitting coordinates + frame to the main GUI thread.
     """
-    # Signal to safely pass the OpenCV image array to the UI thread
-    frame_received = pyqtSignal(np.ndarray)
+    # Signal: (x, y, width, height, decoded_opencv_patch)
+    patch_received = pyqtSignal(int, int, int, int, np.ndarray)
     
     def __init__(self, host_ip, auth_code):
         super().__init__()
@@ -93,6 +92,7 @@ class VideoReceiverThread(QThread):
         self.auth_code = auth_code
 
     def run(self):
+        HEADER_SIZE = 12  # 4 bytes size + 2 bytes x + 2 bytes y + 2 bytes w + 2 bytes h
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             client_socket.connect((self.host_ip, 5050))
@@ -102,23 +102,25 @@ class VideoReceiverThread(QThread):
             client_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
 
             while True:
-                # 1. Read size header
-                raw_size = recvall(client_socket, 4)
-                if not raw_size:
+                # 1. Read 12-byte header
+                raw_header = recvall(client_socket, HEADER_SIZE)
+                if not raw_header:
                     break
-                size = struct.unpack(">L", raw_size)[0]
                 
-                # 2. Read frame payload
+                # 2. Unpack: L = Size (4B), H = Unsigned Short (2B each for x, y, w, h)
+                size, x, y, w, h = struct.unpack(">LHHHH", raw_header)
+                
+                # 3. Read patch payload
                 frame_data = recvall(client_socket, size)
                 if not frame_data:
                     break
                     
-                # 3. Decode JPEG to numpy array
+                # 4. Decode JPEG patch to numpy array
                 nparr = np.frombuffer(frame_data, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                patch = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
-                if frame is not None:
-                    self.frame_received.emit(frame)
+                if patch is not None:
+                    self.patch_received.emit(x, y, w, h, patch)
                     
         except Exception as e:
             print(f"Video connection error: {e}")
@@ -140,10 +142,11 @@ class RemoteDesktopClient(QMainWindow):
         self.video_label.setStyleSheet("background-color: black;")
         self.setCentralWidget(self.video_label)
         
-        # State variables for coordinate translation
+        # State variables for coordinate translation & canvas rendering
         self.host_width = None
         self.host_height = None
         self.current_pixmap_size = None
+        self.master_canvas = None  # Persistent canvas storing full desktop state
 
         # Setup the Input Socket
         self.input_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -151,7 +154,7 @@ class RemoteDesktopClient(QMainWindow):
 
         # Start the Video Thread
         self.video_thread = VideoReceiverThread(host_ip=host_ip, auth_code=auth_code)
-        self.video_thread.frame_received.connect(self.update_frame)
+        self.video_thread.patch_received.connect(self.update_frame)
         self.video_thread.start()
         
         # Enable mouse tracking so we can send movements even without clicking
@@ -202,22 +205,34 @@ class RemoteDesktopClient(QMainWindow):
         except Exception as e:
             print(f"Failed to send command: {e}")
 
-    def update_frame(self, frame):
-        """Converts the OpenCV array to a QPixmap and displays it."""
-        # Store original resolution for input math later
-        self.host_height, self.host_width, _ = frame.shape
+    def update_frame(self, x, y, w, h, patch):
+        """
+        Paints incoming delta patches onto a persistent master canvas,
+        then scales the canvas smoothly to fit the window.
+        """
+        # 1. First frame received -> initialize master canvas to native screen resolution
+        if self.master_canvas is None:
+            self.host_width = w
+            self.host_height = h
+            self.master_canvas = QPixmap(w, h)
+            self.master_canvas.fill(Qt.GlobalColor.black)
         
-        # Convert BGR (OpenCV) to RGB (PyQt)
-        rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb_image.shape
-        bytes_per_line = ch * w
+        # 2. Convert BGR (OpenCV) patch to RGB (PyQt)
+        rgb_image = cv2.cvtColor(patch, cv2.COLOR_BGR2RGB)
+        patch_h, patch_w, ch = rgb_image.shape
+        bytes_per_line = ch * patch_w
         
-        # Create QImage and convert to QPixmap
-        qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        pixmap = QPixmap.fromImage(qt_img)
+        # 3. Convert array patch to QPixmap
+        qt_img = QImage(rgb_image.data, patch_w, patch_h, bytes_per_line, QImage.Format.Format_RGB888)
+        patch_pixmap = QPixmap.fromImage(qt_img)
         
-        # Scale the pixmap to fit the window while keeping aspect ratio
-        scaled_pixmap = pixmap.scaled(
+        # 4. Paint the patch onto our master canvas at coordinates (x, y)
+        painter = QPainter(self.master_canvas)
+        painter.drawPixmap(x, y, patch_pixmap)
+        painter.end()
+        
+        # 5. Scale the master canvas to match the current window size
+        scaled_pixmap = self.master_canvas.scaled(
             self.video_label.width(),
             self.video_label.height(),
             Qt.AspectRatioMode.KeepAspectRatio,
