@@ -20,7 +20,7 @@ if platform.system() == "Windows":
 IS_WINDOWS = (platform.system() == "Windows")
 
 if IS_WINDOWS:
-    import dxcam
+    import dxcam # type: ignore
 else:
     import mss
 

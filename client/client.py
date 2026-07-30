@@ -8,12 +8,16 @@ import numpy as np
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QLabel, QVBoxLayout, 
+    QWidget, QDialog, QLineEdit, QDialogButtonBox, QMessageBox
+)
+from PyQt6.QtCore import Qt
 import os
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
 # Configuration
 HOST_IP = '127.0.0.1'  # Replace with the Tailscale IP of your Host
-SECRET_TOKEN = "my_secure_mesh_password"
 
 def recvall(sock, n):
     """Helper to reliably receive exactly n bytes."""
@@ -25,6 +29,56 @@ def recvall(sock, n):
         data.extend(packet)
     return data
 
+class AuthDialog(QDialog):
+    """
+    A modal popup dialog that prompts the user for their 6-digit TOTP code.
+    """
+    def __init__(self, host_ip, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Authentication Required")
+        self.setFixedSize(300, 150)
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        
+        # Instruction label
+        label = QLabel(f"Enter 6-digit code for:\n{host_ip}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        
+        # 6-digit input field
+        self.code_input = QLineEdit(self)
+        self.code_input.setPlaceholderText("123456")
+        self.code_input.setMaxLength(6)
+        self.code_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Larger font for readability
+        font = self.code_input.font()
+        font.setPointSize(16)
+        self.code_input.setFont(font)
+        layout.addWidget(self.code_input)
+        
+        # OK and Cancel buttons
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.button_box.accepted.connect(self.validate_and_accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+        
+        self.auth_code = None
+
+    def validate_and_accept(self):
+        """
+        Ensures the user entered something before accepting the modal.
+        """
+        text = self.code_input.text().strip()
+        if len(text) != 6 or not text.isdigit():
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid 6-digit numeric code.")
+            return
+            
+        self.auth_code = text
+        self.accept()
+
 class VideoReceiverThread(QThread):
     """
     Runs in the background, receiving JPEG frames, decoding them, 
@@ -32,14 +86,19 @@ class VideoReceiverThread(QThread):
     """
     # Signal to safely pass the OpenCV image array to the UI thread
     frame_received = pyqtSignal(np.ndarray)
+    
+    def __init__(self, host_ip, auth_code):
+        super().__init__()
+        self.host_ip = host_ip
+        self.auth_code = auth_code
 
     def run(self):
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            client_socket.connect((HOST_IP, 5050))
+            client_socket.connect((self.host_ip, 5050))
             
             # Send Authentication Token
-            auth_payload = json.dumps({"token": SECRET_TOKEN}).encode('utf-8')
+            auth_payload = json.dumps({"token": self.auth_code}).encode('utf-8')
             client_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
 
             while True:
@@ -68,10 +127,12 @@ class VideoReceiverThread(QThread):
 
 
 class RemoteDesktopClient(QMainWindow):
-    def __init__(self):
+    def __init__(self, host_ip, auth_code):
         super().__init__()
         self.setWindowTitle("Mesh Remote Desktop")
         self.resize(1280, 720)
+        self.host_ip = host_ip
+        self.auth_code = auth_code
         
         # Setup the video display label
         self.video_label = QLabel(self)
@@ -89,7 +150,7 @@ class RemoteDesktopClient(QMainWindow):
         self.connect_input_socket()
 
         # Start the Video Thread
-        self.video_thread = VideoReceiverThread()
+        self.video_thread = VideoReceiverThread(host_ip=host_ip, auth_code=auth_code)
         self.video_thread.frame_received.connect(self.update_frame)
         self.video_thread.start()
         
@@ -100,8 +161,8 @@ class RemoteDesktopClient(QMainWindow):
     def connect_input_socket(self):
         """Establishes the connection for the input stream and authenticates."""
         try:
-            self.input_socket.connect((HOST_IP, 5051))
-            auth_payload = json.dumps({"token": SECRET_TOKEN}).encode('utf-8')
+            self.input_socket.connect((self.host_ip, 5051))
+            auth_payload = json.dumps({"token": self.auth_code}).encode('utf-8')
             self.input_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
         except Exception as e:
             print(f"Failed to connect input socket: {e}")
@@ -265,17 +326,33 @@ class RemoteDesktopClient(QMainWindow):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mesh Remote Desktop Client")
-    parser.add_argument("ip", help="The Tailscale IP address of the Host")
-    parser.add_argument("--token", default="my_secure_mesh_password", help="The secret auth token")
-    
-    # 2. Parse the arguments
+    parser.add_argument("ip", help="The IP address of the Host (Windows machine)")
+    parser.add_argument("--code", help="6-digit Google Authenticator code (optional)", default=None)
     args = parser.parse_args()
     
-    # 3. Override the global variables before starting the app
     HOST_IP = args.ip
-    # SECRET_TOKEN = args.token
     
+    # 1. MUST initialize QApplication before opening any GUI dialogs or windows
     app = QApplication(sys.argv)
-    window = RemoteDesktopClient()
+    
+    # 2. Determine the auth code: use CLI argument if present, otherwise show popup
+    auth_code = args.code
+    
+    if not auth_code:
+        dialog = AuthDialog(host_ip=HOST_IP)
+        # .exec() opens the dialog modally and pauses execution until Accepted or Rejected
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted and dialog.auth_code:
+            auth_code = dialog.auth_code
+        else:
+            print("[Client] Authentication cancelled by user. Exiting...")
+            sys.exit(0)
+
+    print(f"[Client] Connecting to {HOST_IP} with token...")
+    
+    # 3. Launch the main Remote Desktop GUI
+    window = RemoteDesktopClient(host_ip=HOST_IP, auth_code=auth_code)
     window.show()
+    
     sys.exit(app.exec())

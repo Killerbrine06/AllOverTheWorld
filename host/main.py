@@ -4,6 +4,8 @@ import struct
 import json
 import os
 
+import pyotp
+
 # Import the worker functions we already wrote
 from video_thread import video_stream_worker
 from input_thread import input_stream_worker, recvall
@@ -18,43 +20,37 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # The Security Layer: In a real app, you would use a TOTP library (like pyotp) 
 # or load this from an environment variable.
-SECRET_TOKEN = "my_secure_mesh_password"
+TOTP_SECRET_KEY = "NFHTWDWNUU4XIGXEEYNETYHYGOL6XDSE"
 
 def authenticate_client(client_socket):
     """
-    Forces the client to send a JSON auth payload before doing anything else.
-    Includes bounds-checking to prevent memory exhaustion DoS attacks.
+    Verifies the 6-digit Google Authenticator code sent by the client.
     """
-    # Max size for our {"token": "..."} JSON is tiny. 
-    # 1024 bytes is more than generous.
     MAX_PAYLOAD_SIZE = 1024 
-    
     try:
-        # 1. Read the 4-byte size header
-        raw_msglen = recvall(client_socket, 4)
-        if not raw_msglen:
+        raw_msglen = client_socket.recv(4)
+        if not raw_msglen or len(raw_msglen) < 4:
             return False
         
-        # 2. Unpack the requested size
         msglen = struct.unpack(">L", raw_msglen)[0]
-        
-        # THE FIX: Bounds checking
         if msglen > MAX_PAYLOAD_SIZE:
-            print(f"SECURITY ALERT: Client attempted to send {msglen} bytes. Dropping.")
             return False
             
-        # 3. Read the JSON payload safely
-        raw_data = recvall(client_socket, msglen)
+        raw_data = client_socket.recv(msglen)
         if not raw_data:
             return False
             
-        # 4. Parse and verify
         auth_msg = json.loads(raw_data.decode('utf-8'))
-        if auth_msg.get("token") == SECRET_TOKEN:
+        client_code = str(auth_msg.get("token", "")).strip()
+        
+        # Verify against current Unix epoch time
+        # valid_window=1 allows codes that expired up to 30s ago to prevent network latency rejections
+        totp = pyotp.TOTP(TOTP_SECRET_KEY)
+        if totp.verify(client_code, valid_window=1):
             return True
             
     except Exception as e:
-        print(f"Auth error: {e}")
+        print(f"[Auth Error] Handshake failed: {e}")
         
     return False
 
@@ -110,8 +106,6 @@ if __name__ == "__main__":
     local_ip = get_local_ip()
     print("="*50)
     print(f"HOST MACHINE LAN IPv4: {local_ip}")
-    print(f"Run this on your Client PC:")
-    print(f"  python client.py {local_ip} --token {SECRET_TOKEN}")
     print("="*50)
     # Start the Input Server on Port 5001 in the background
     input_thread = threading.Thread(

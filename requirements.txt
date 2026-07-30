@@ -5,3 +5,5 @@ pynput
 PyQt6
 qrcode
 dxcam; sys_platform == 'win32'
+pyotp
+pillow
