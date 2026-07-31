@@ -16,7 +16,7 @@ print("=" * 60)
 # 2. Build the provisioning URI
 uri = pyotp.totp.TOTP(secret).provisioning_uri(
     name="Windows-Host-PC", 
-    issuer_name="MeshRemoteDesktop"
+    issuer_name="AllOverTheWorld"
 )
 
 # 3. Save as a QR code image

@@ -11,10 +11,8 @@ import platform
 if platform.system() == "Windows":
     try:
         import ctypes
-        # SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
         ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
     except AttributeError:
-        # Fallback for older Windows builds
         ctypes.windll.user32.SetProcessDPIAware()
         
 IS_WINDOWS = (platform.system() == "Windows")
@@ -25,10 +23,10 @@ else:
     import mss
 
 def video_stream_worker(client_socket):
-    # Quality 78 is the sweet spot for crisp text without choking Wi-Fi bandwidth
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 78]
+    # PNG Compression Level: 0 (fastest/largest) to 9 (slowest/smallest)
+    # Level 2 is the real-time sweet spot for lossless UI patches
+    encode_param = [int(cv2.IMWRITE_PNG_COMPRESSION), 2]
     
-    # 1. Initialize camera inside the worker so every new connection gets a fresh handle
     camera = None
     sct = None
     if IS_WINDOWS:
@@ -38,38 +36,69 @@ def video_stream_worker(client_socket):
         sct = mss.mss()
         monitor = sct.monitors[1]
     
+    prev_frame = None
+    
     try:
         while True:
-            # --- 2. GRAB THE FRAME ---
+            # 1. Grab the latest frame
             if IS_WINDOWS:
-                # Grab latest frame directly from GPU memory
-                frame = camera.get_latest_frame()
-                if frame is None:
-                    continue  # If screen hasn't updated this microsecond, skip
+                curr_frame = camera.get_latest_frame()
+                if curr_frame is None:
+                    continue
             else:
                 raw_frame = sct.grab(monitor)
-                frame = np.array(raw_frame)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-            # -------------------------
+                curr_frame = cv2.cvtColor(np.array(raw_frame), cv2.COLOR_BGRA2BGR)
 
-            # 3. Compress to JPEG
-            result, encoded_frame = cv2.imencode('.jpg', frame, encode_param)
+            # 2. First frame after connection -> Send Full Screen
+            if prev_frame is None:
+                x, y = 0, 0
+                h, w = curr_frame.shape[:2]
+                patch = curr_frame
+                prev_frame = curr_frame.copy()
+            else:
+                # --- DIRTY RECTANGLE DETECTION ---
+                diff = cv2.absdiff(curr_frame, prev_frame)
+                gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                
+                # Threshold ignores minor GPU/video rendering noise
+                _, thresh = cv2.threshold(gray_diff, 15, 255, cv2.THRESH_BINARY)
+                
+                y_indices, x_indices = np.where(thresh > 0)
+                
+                # If zero pixels changed, skip transmitting entirely!
+                if len(y_indices) == 0 or len(x_indices) == 0:
+                    continue
+                
+                x_min, x_max = int(np.min(x_indices)), int(np.max(x_indices))
+                y_min, y_max = int(np.min(y_indices)), int(np.max(y_indices))
+                
+                # Add 2-pixel padding so anti-aliased font edges aren't clipped
+                x = max(0, x_min - 2)
+                y = max(0, y_min - 2)
+                w = min(curr_frame.shape[1] - x, (x_max - x_min) + 4)
+                h = min(curr_frame.shape[0] - y, (y_max - y_min) + 4)
+                
+                patch = curr_frame[y:y+h, x:x+w]
+                prev_frame = curr_frame.copy()
+                # ---------------------------------
+
+            # 3. Compress ONLY the patch to PNG (Lossless)
+            result, encoded_patch = cv2.imencode('.png', patch, encode_param)
             if not result:
                 continue
                 
-            data = encoded_frame.tobytes()
+            data = encoded_patch.tobytes()
             size = len(data)
             
-            # 4. Send size header (4 bytes) + image payload
-            client_socket.sendall(struct.pack(">L", size) + data)
+            # 4. Pack 12-Byte Header: [Size(L), X(H), Y(H), W(H), H(H)] + Patch Bytes
+            header = struct.pack(">LHHHH", size, x, y, w, h)
+            client_socket.sendall(header + data)
 
-    # CATCH WINDOWS ERROR 10053 EXPLICITLY AS A CLEAN DISCONNECT
     except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
         print("[Video Server] Client disconnected cleanly.")
     except Exception as e:
         print(f"[Video Server] Unexpected stream error: {e}")
     finally:
-        # Stop and delete the DXcam instance so the next connection can reuse the GPU
         if IS_WINDOWS and camera is not None:
             try:
                 camera.stop()
@@ -77,7 +106,6 @@ def video_stream_worker(client_socket):
             except Exception:
                 pass
                 
-        # Gracefully shut down the socket before closing to free the Windows TCP port instantly
         try:
             client_socket.shutdown(socket.SHUT_RDWR)
         except Exception:
@@ -85,21 +113,16 @@ def video_stream_worker(client_socket):
         client_socket.close()
         print("[Video Server] Socket closed. Ready for new connection.")
 
-# Example usage (setting up the server socket):
 def start_host_server(host='0.0.0.0', port=5050):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Allow immediate port reuse if the script crashes
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(1)
     
     print(f"Waiting for connection on port {port}...")
-    
     while True:
         client_socket, addr = server.accept()
         print(f"Connection established from {addr}")
-        
-        # Spin up the video thread for this client
         video_thread = threading.Thread(
             target=video_stream_worker, 
             args=(client_socket,),
