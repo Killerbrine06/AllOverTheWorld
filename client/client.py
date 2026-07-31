@@ -98,7 +98,10 @@ class VideoReceiverThread(QThread):
             client_socket.connect((self.host_ip, 5050))
             
             # Send Authentication Token
-            auth_payload = json.dumps({"token": self.auth_code}).encode('utf-8')
+            auth_payload = json.dumps({
+                "token": self.auth_code,
+                "client_os": "mac" if sys.platform == "darwin" else "windows"
+            }).encode('utf-8')
             client_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
 
             while True:
@@ -131,7 +134,7 @@ class VideoReceiverThread(QThread):
 class RemoteDesktopClient(QMainWindow):
     def __init__(self, host_ip, auth_code):
         super().__init__()
-        self.setWindowTitle("Mesh Remote Desktop")
+        self.setWindowTitle("AllOverTheWorld Remote Desktop")
         self.resize(1280, 720)
         self.host_ip = host_ip
         self.auth_code = auth_code
@@ -165,7 +168,10 @@ class RemoteDesktopClient(QMainWindow):
         """Establishes the connection for the input stream and authenticates."""
         try:
             self.input_socket.connect((self.host_ip, 5051))
-            auth_payload = json.dumps({"token": self.auth_code}).encode('utf-8')
+            auth_payload = json.dumps({
+                "token": self.auth_code,
+                "client_os": "mac" if sys.platform == "darwin" else "windows"
+            }).encode('utf-8')
             self.input_socket.sendall(struct.pack(">L", len(auth_payload)) + auth_payload)
         except Exception as e:
             print(f"Failed to connect input socket: {e}")

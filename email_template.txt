@@ -1,0 +1,14 @@
+Hello,
+
+A successful remote desktop session was just established on your Windows Host PC.
+
+Connection Details:
+-------------------------------------------
+• Client IPv4 Address : {client_ip}
+• Client OS           : {client_os}
+• Timestamp           : {timestamp}
+-------------------------------------------
+
+If you did not authorize this connection, terminate the host script immediately.
+
+— AllOverTheWorld Service
