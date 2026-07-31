@@ -110,11 +110,11 @@ if __name__ == "__main__":
     # Start the Input Server on Port 5001 in the background
     input_thread = threading.Thread(
         target=server_listener, 
-        args=(5001, input_stream_worker, "Input Server"), 
+        args=(5051, input_stream_worker, "Input Server"), 
         daemon=True
     )
     input_thread.start()
     
     # Start the Video Server on Port 5000 in the main thread
     # (This blocks the main thread from exiting, keeping the app alive)
-    server_listener(5000, video_stream_worker, "Video Server")
+    server_listener(5050, video_stream_worker, "Video Server")
