@@ -8,10 +8,15 @@ Many standard remote desktop solutions rely on continuous, lossy H.264 video str
 
 ### 1. Core Architecture & Networking
 The application employs a robust multithreaded client-server model utilizing dual raw TCP sockets:
-- **Port 5050 (Video):** Dedicated entirely to the high-bandwidth video payload pipeline.
+- **Port 5050 (Video):** Dedicated entirely to the high-bandwidth video payload pipeline using a custom binary protocol.
 - **Port 5051 (Input):** A lightweight, isolated stream exclusively for serialized JSON input commands.
 
 This separation guarantees that heavy image payloads never block or delay time-sensitive mouse and keyboard interrupts. The socket architecture features robust connection handling, including explicit graceful tear-downs and strict `TIME_WAIT` management. This design safely cleans up resources and prevents DirectX GPU deadlocks upon abrupt client disconnections.
+
+#### Protocol Design Trade-Off: Binary Structs vs. Serialized JSON
+The divergence in wire formats reflects a deliberate systems design decision balancing **throughput** against **structural flexibility**:
+- **Custom Binary Header on Port 5050 (Speed & Determinism):** Operating at up to 60 FPS, the video pipeline cannot afford serialization overhead or memory allocations in the hot path. A fixed 12-byte C-struct header (`struct.pack('>LHHHH', size, x, y, w, h)`) enables immediate parsing in constant time, allowing the client to slice raw PNG bytes directly into OpenCV decoding buffers with zero string-decoding overhead.
+- **Length-Prefixed JSON on Port 5051 (Structural Flexibility & Extensibility):** While inputs require minimal bandwidth, event payloads are heterogeneous—ranging from continuous coordinate updates (`x, y`), two-axis trackpad scroll vectors (`dx, dy`), to key state transitions carrying OS modifier metadata. A 4-byte length-prefixed JSON format allows schema polymorphism and cross-platform flexibility without the maintenance burden of rigid binary bitmasks.
 
 ### 2. Delta Streaming ("Dirty Rectangles")
 To reduce video compression artifacts and improve text clarity compared to standard lossy feeds, the pipeline transmits selective delta patches:
