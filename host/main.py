@@ -18,23 +18,23 @@ import os
 from dotenv import load_dotenv
 
 # Automatically loads variables from the .env file into the system environment
+script_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(script_dir, ".env"))
 load_dotenv()
 
-# Fetch the secrets safely
+# Fetch configuration and secrets safely
 TOTP_SECRET_KEY = os.getenv("TOTP_SECRET_KEY")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+raw_receivers = os.getenv("EMAIL_RECEIVER", "")
+EMAIL_RECEIVER = [email.strip() for email in raw_receivers.split(",") if email.strip()]
 
-if not TOTP_SECRET_KEY or not EMAIL_PASSWORD:
+if not TOTP_SECRET_KEY or not EMAIL_PASSWORD or not EMAIL_SENDER or not EMAIL_RECEIVER:
     raise ValueError("Missing secrets! Check your .env file.")
 
 # Email Notification Settings
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
-EMAIL_SENDER = "cacenschivlad@gmail.com"
-EMAIL_RECEIVER = [
-    "cacenschivlad@gmail.com",
-    "gabrielacacenschi@gmail.com"            
-    ]
 # --------------------------------------------
 
 def signal_handler(sig, frame):
