@@ -1,5 +1,7 @@
 # AllOverTheWorld
 
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey.svg) 
+
 **AllOverTheWorld** is a high-performance, multithreaded remote desktop application written entirely in Python. Designed for developers and power users, it focuses on responsive input handling and clean UI delta updates over heavy lossy video encoding.
 
 Many standard remote desktop solutions rely on continuous, lossy H.264 video streams that can introduce noticeable compression artifacts around fine UI elements and text. To improve text legibility and minimize unnecessary bandwidth consumption, AllOverTheWorld implements a custom **"Dirty Rectangles" delta streaming pipeline** utilizing PNG compression for UI updates. Combined with a dual-socket architecture, it ensures that demanding graphical workloads do not bottleneck time-sensitive keyboard and mouse inputs.
